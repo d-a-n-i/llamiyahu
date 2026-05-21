@@ -65,10 +65,12 @@ export class AudioAnalyser {
   private buffer: AudioBuffer | null = null;
 
   // --- Reused sample buffers (allocated once after the AnalyserNode exists) ---
-  private frequencyBytes: Uint8Array = new Uint8Array(0);
-  private timeDomainBytes: Uint8Array = new Uint8Array(0);
-  private frequencyFloats: Float32Array = new Float32Array(0);
-  private timeDomainFloats: Float32Array = new Float32Array(0);
+  // (Generic parameter inferred from `new Uint8Array(...)` so AnalyserNode's
+  // typed-array signatures - which require `<ArrayBuffer>` in TS 5.7+ - line up.)
+  private frequencyBytes = new Uint8Array(0);
+  private timeDomainBytes = new Uint8Array(0);
+  private frequencyFloats = new Float32Array(0);
+  private timeDomainFloats = new Float32Array(0);
 
   // --- Playback timing ---
   // `startedAt` is the AudioContext time at which the current source was
