@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="llamiyahu — a minimalist client-side audio visualizer." />
+    <title>llamiyahu</title>
+    <script type="module" crossorigin src="/assets/index-CixQOE2-.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DkorDD7H.css">
+  </head>
+  <body>
+    <input id="file-input" type="file" accept="audio/*" hidden />
+
+    <main id="app" data-state="idle" data-controls="active">
+      <canvas id="stage" aria-hidden="true"></canvas>
+
+      <!-- Idle splash -->
+      <section class="splash" aria-label="Welcome">
+        <div class="splash__inner">
+          <h1 class="brand">llamiyahu</h1>
+          <p class="tag">audio you can see</p>
+
+          <button class="splash-btn" type="button" data-action="splash-pick" aria-label="Choose an audio file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 16V4M12 4l-5 5M12 4l5 5"/>
+              <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+            </svg>
+            <span>Choose audio</span>
+          </button>
+          <p class="splash-hint">or drop a file anywhere</p>
+        </div>
+      </section>
+
+      <!-- Track label, top-centre -->
+      <div class="topbar" data-role="trackbar" aria-live="polite"></div>
+
+      <!-- Drag-over fullscreen overlay -->
+      <div class="drop-overlay" data-state="hidden" aria-hidden="true">
+        <div class="drop-overlay__inner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 16V4M12 4l-5 5M12 4l5 5"/>
+            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+          <span>drop to play</span>
+        </div>
+      </div>
+
+      <!-- Playback controls -->
+      <section class="controls" aria-label="Playback controls">
+        <button class="ctrl ctrl--play" type="button" data-action="play" data-state="paused" aria-label="Play">
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+
+        <div class="ctrl__time" data-role="time-current">0:00</div>
+
+        <div class="scrub">
+          <div class="scrub__track">
+            <div class="scrub__fill" data-role="scrub-fill"></div>
+          </div>
+          <div class="scrub__head" data-role="scrub-head"></div>
+          <input
+            class="scrub__input"
+            type="range"
+            min="0"
+            max="1000"
+            step="1"
+            value="0"
+            data-role="scrub-input"
+            aria-label="Seek"
+          />
+        </div>
+
+        <div class="ctrl__time" data-role="time-total">0:00</div>
+
+        <div class="modes" role="tablist" aria-label="Visualization mode"></div>
+
+        <button class="ctrl" type="button" data-action="load" aria-label="Load another audio file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 16V4M12 4l-5 5M12 4l5 5"/>
+            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+        </button>
+      </section>
+    </main>
+
+  </body>
+</html>
