@@ -11,29 +11,59 @@
     <meta name="color-scheme" content="dark" />
     <meta name="description" content="llamiyahu — a minimalist client-side audio visualizer." />
     <title>llamiyahu</title>
-    <script type="module" crossorigin src="/assets/index-CixQOE2-.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DkorDD7H.css">
+    <script type="module" crossorigin src="/assets/index-Oxa5ImuJ.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Cx3iwbny.css">
   </head>
   <body>
     <input id="file-input" type="file" accept="audio/*" hidden />
 
-    <main id="app" data-state="idle" data-controls="active">
+    <main id="app" data-state="idle" data-controls="active" data-library="open">
       <canvas id="stage" aria-hidden="true"></canvas>
 
-      <!-- Idle splash -->
-      <section class="splash" aria-label="Welcome">
+      <!-- Library / splash -->
+      <section class="splash" aria-label="Music library">
         <div class="splash__inner">
           <h1 class="brand">llamiyahu</h1>
           <p class="tag">audio you can see</p>
 
-          <button class="splash-btn" type="button" data-action="splash-pick" aria-label="Choose an audio file">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 16V4M12 4l-5 5M12 4l5 5"/>
-              <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-            </svg>
-            <span>Choose audio</span>
-          </button>
-          <p class="splash-hint">or drop a file anywhere</p>
+          <form class="search" data-role="search-form" autocomplete="off">
+            <input
+              class="search__input"
+              type="search"
+              data-role="search-input"
+              placeholder="Search Archive.org — artist, genre, title…"
+              aria-label="Search Internet Archive for audio"
+              enterkeyhint="search"
+            />
+            <button class="search__btn" type="submit" data-role="search-btn" aria-label="Search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"/>
+                <path d="M20 20l-3.5-3.5"/>
+              </svg>
+            </button>
+          </form>
+          <p class="search__status" data-role="search-status" aria-live="polite"></p>
+
+          <div class="track-section">
+            <h2 class="track-section__label">Featured demos</h2>
+            <div class="track-list" data-role="featured"></div>
+          </div>
+
+          <div class="track-section track-section--results">
+            <h2 class="track-section__label">Search results</h2>
+            <div class="track-list" data-role="results"></div>
+          </div>
+
+          <div class="splash__actions">
+            <button class="splash-btn" type="button" data-action="splash-pick" aria-label="Choose an audio file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 16V4M12 4l-5 5M12 4l5 5"/>
+                <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+              </svg>
+              <span>Upload file</span>
+            </button>
+            <p class="splash-hint">YouTube / Spotify blocked by ToS — Archive.org + local files instead</p>
+          </div>
         </div>
       </section>
 
@@ -80,6 +110,13 @@
         <div class="ctrl__time" data-role="time-total">0:00</div>
 
         <div class="modes" role="tablist" aria-label="Visualization mode"></div>
+
+        <button class="ctrl" type="button" data-action="library" aria-label="Open music library">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="M20 20l-3.5-3.5"/>
+          </svg>
+        </button>
 
         <button class="ctrl" type="button" data-action="load" aria-label="Load another audio file">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
