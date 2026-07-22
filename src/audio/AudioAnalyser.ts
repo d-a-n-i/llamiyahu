@@ -189,9 +189,12 @@ export class AudioAnalyser {
     }
   }
 
-  /** Load audio from a URL (same-origin or properly CORS-enabled). */
-  async loadUrl(url: string): Promise<void> {
-    this.fileName = url.split("/").pop() ?? url;
+  /**
+   * Load audio from a URL (same-origin or properly CORS-enabled).
+   * Optional `displayName` is shown in the track label / controls.
+   */
+  async loadUrl(url: string, displayName?: string): Promise<void> {
+    this.fileName = displayName ?? url.split("/").pop() ?? url;
     this.lastError = null;
     this.setState("loading");
     try {

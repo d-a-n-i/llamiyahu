@@ -24,6 +24,7 @@ export interface ControlsOptions {
   topbar: HTMLElement;
   playBtn: HTMLButtonElement;
   loadBtn: HTMLButtonElement;
+  libraryBtn: HTMLButtonElement;
   modesContainer: HTMLElement;
   scrubInput: HTMLInputElement;
   scrubFill: HTMLElement;
@@ -34,6 +35,7 @@ export interface ControlsOptions {
   analyser: AudioAnalyser;
   engine: VisualizerEngine;
   onRequestLoad: () => void;
+  onRequestLibrary: () => void;
   hideAfterMs?: number;
 }
 
@@ -98,7 +100,7 @@ export class Controls {
   // ---------------------------------------------------------------------------
 
   private bindControls(): void {
-    const { playBtn, loadBtn, scrubInput, controlsRoot, analyser } = this.opts;
+    const { playBtn, loadBtn, libraryBtn, scrubInput, controlsRoot, analyser } = this.opts;
 
     playBtn.addEventListener("click", () => {
       // togglePlay calls unlock + resume implicitly via play().
@@ -108,6 +110,11 @@ export class Controls {
 
     loadBtn.addEventListener("click", () => {
       this.opts.onRequestLoad();
+    });
+
+    libraryBtn.addEventListener("click", () => {
+      this.opts.onRequestLibrary();
+      this.show();
     });
 
     scrubInput.addEventListener("pointerdown", () => {
