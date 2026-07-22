@@ -1,5 +1,4 @@
 import {
-  FEATURED_TRACKS,
   displayName,
   resolvePlayableUrl,
   searchArchive,
@@ -7,8 +6,8 @@ import {
 } from "../music/library.ts";
 
 /**
- * MusicBrowser — splash-panel search against the Internet Archive, plus a
- * curated featured row for one-click demos when the network is slow/offline.
+ * MusicBrowser — splash-panel search against the Internet Archive.
+ * Local file upload is handled separately via DropZone.
  */
 
 export interface MusicBrowserOptions {
@@ -16,7 +15,6 @@ export interface MusicBrowserOptions {
   searchInput: HTMLInputElement;
   searchBtn: HTMLButtonElement;
   resultsEl: HTMLElement;
-  featuredEl: HTMLElement;
   statusEl: HTMLElement;
   onSelect: (track: TrackRef, playableUrl: string) => void | Promise<void>;
 }
@@ -39,8 +37,7 @@ export class MusicBrowser {
     if (this.attached) return;
     this.attached = true;
     this.opts.form.addEventListener("submit", this.onSubmit);
-    this.renderFeatured();
-    this.setStatus("Search Creative Commons audio on the Internet Archive");
+    this.setStatus("Search free music on Archive.org — or upload a file below");
   }
 
   detach(): void {
@@ -49,33 +46,26 @@ export class MusicBrowser {
     this.opts.form.removeEventListener("submit", this.onSubmit);
   }
 
-  private renderFeatured(): void {
-    this.opts.featuredEl.replaceChildren();
-    for (const track of FEATURED_TRACKS) {
-      this.opts.featuredEl.appendChild(this.makeTrackButton(track));
-    }
-  }
-
   private async runSearch(): Promise<void> {
     const q = this.opts.searchInput.value.trim();
     if (!q) {
-      this.setStatus("Type an artist, genre, or title to search");
+      this.setStatus("Type an artist, genre, or title");
       return;
     }
 
     const seq = ++this.querySeq;
-    this.setStatus("Searching Archive.org…");
+    this.setStatus("Searching…");
     this.opts.resultsEl.replaceChildren();
     this.opts.searchBtn.disabled = true;
 
     try {
-      const tracks = await searchArchive(q, 14);
+      const tracks = await searchArchive(q);
       if (seq !== this.querySeq) return;
       if (tracks.length === 0) {
-        this.setStatus("No MP3 results — try a broader query");
+        this.setStatus("No playable results — try a different query");
         return;
       }
-      this.setStatus(`${tracks.length} results from Internet Archive`);
+      this.setStatus(`${tracks.length} results`);
       for (const track of tracks) {
         this.opts.resultsEl.appendChild(this.makeTrackButton(track));
       }
@@ -100,10 +90,7 @@ export class MusicBrowser {
 
     const meta = document.createElement("span");
     meta.className = "track-btn__meta";
-    meta.textContent =
-      track.source === "featured"
-        ? `${track.artist} · demo`
-        : `${track.artist} · archive.org`;
+    meta.textContent = track.artist;
 
     btn.append(title, meta);
     btn.addEventListener("click", () => {

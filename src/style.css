@@ -233,15 +233,6 @@ button, input, label, a {
   width: 100%;
 }
 
-.track-section__label {
-  margin: 0 0 8px;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--fg-mute);
-}
-
 .track-section--results:not(:has(.track-btn)) {
   display: none;
 }
@@ -250,7 +241,7 @@ button, input, label, a {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: min(28vh, 240px);
+  max-height: min(36vh, 320px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;

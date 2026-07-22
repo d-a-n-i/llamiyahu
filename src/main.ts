@@ -94,7 +94,6 @@ function boot(): void {
     searchInput: $<HTMLInputElement>('[data-role="search-input"]'),
     searchBtn: $<HTMLButtonElement>('[data-role="search-btn"]'),
     resultsEl: $('[data-role="results"]'),
-    featuredEl: $('[data-role="featured"]'),
     statusEl: $('[data-role="search-status"]'),
     onSelect: async (track: TrackRef, playableUrl: string): Promise<void> => {
       try {

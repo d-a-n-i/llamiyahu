@@ -198,17 +198,24 @@ export class AudioAnalyser {
     this.lastError = null;
     this.setState("loading");
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { mode: "cors", credentials: "omit" });
       if (!res.ok) {
-        throw new Error(`Failed to fetch audio: ${res.status} ${res.statusText}`);
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("This file is restricted — try another result.");
+        }
+        throw new Error(`Failed to fetch audio (${res.status}).`);
       }
       const data = await res.arrayBuffer();
       await this.decodeAndAdopt(data);
     } catch (err) {
+      const raw = err instanceof Error ? err.message : "Failed to load audio url.";
+      // Browsers surface CORS / network failures as the opaque "Failed to fetch".
       this.lastError =
-        err instanceof Error ? err.message : "Failed to load audio url.";
+        /failed to fetch|networkerror|load failed/i.test(raw)
+          ? "Could not download audio (CORS or network). Try another result or upload a file."
+          : raw;
       this.setState("idle");
-      throw err;
+      throw new Error(this.lastError);
     }
   }
 
