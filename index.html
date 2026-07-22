@@ -11,8 +11,8 @@
     <meta name="color-scheme" content="dark" />
     <meta name="description" content="llamiyahu — a minimalist client-side audio visualizer." />
     <title>llamiyahu</title>
-    <script type="module" crossorigin src="/assets/index-Oxa5ImuJ.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Cx3iwbny.css">
+    <script type="module" crossorigin src="/assets/index-CdST6gZe.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BUw7isj2.css">
   </head>
   <body>
     <input id="file-input" type="file" accept="audio/*" hidden />
@@ -44,13 +44,7 @@
           </form>
           <p class="search__status" data-role="search-status" aria-live="polite"></p>
 
-          <div class="track-section">
-            <h2 class="track-section__label">Featured demos</h2>
-            <div class="track-list" data-role="featured"></div>
-          </div>
-
-          <div class="track-section track-section--results">
-            <h2 class="track-section__label">Search results</h2>
+          <div class="track-section track-section--results" data-role="results-section">
             <div class="track-list" data-role="results"></div>
           </div>
 
@@ -62,7 +56,7 @@
               </svg>
               <span>Upload file</span>
             </button>
-            <p class="splash-hint">YouTube / Spotify blocked by ToS — Archive.org + local files instead</p>
+            <p class="splash-hint">or drop a file anywhere</p>
           </div>
         </div>
       </section>
