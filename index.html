@@ -41,6 +41,19 @@
             </button>
           </form>
           <p class="search__status" data-role="search-status" aria-live="polite"></p>
+          <div
+            class="load-progress"
+            data-role="load-progress"
+            hidden
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-label="Loading audio"
+          >
+            <div class="load-progress__track">
+              <div class="load-progress__fill" data-role="load-progress-fill"></div>
+            </div>
+          </div>
 
           <div class="track-section track-section--results" data-role="results-section">
             <div class="track-list" data-role="results"></div>

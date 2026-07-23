@@ -95,6 +95,9 @@ function boot(): void {
     searchBtn: $<HTMLButtonElement>('[data-role="search-btn"]'),
     resultsEl: $('[data-role="results"]'),
     statusEl: $('[data-role="search-status"]'),
+    progressRoot: $('[data-role="load-progress"]'),
+    progressFill: $('[data-role="load-progress-fill"]'),
+    analyser,
     onSelect: async (track: TrackRef, playableUrl: string): Promise<void> => {
       try {
         await playFromUrl(playableUrl, displayName(track));
