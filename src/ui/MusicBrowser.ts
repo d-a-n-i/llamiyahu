@@ -1,7 +1,7 @@
 import {
   displayName,
   resolvePlayableUrl,
-  searchArchive,
+  searchArchivePlayable,
   type TrackRef,
 } from "../music/library.ts";
 import type { AudioAnalyser } from "../audio/AudioAnalyser.ts";
@@ -28,6 +28,7 @@ export class MusicBrowser {
   private querySeq = 0;
   private attached = false;
   private picking = false;
+  private searchAbort: AbortController | null = null;
   private unsubscribe: (() => void) | null = null;
 
   private readonly onSubmit = (e: Event): void => {
@@ -61,6 +62,8 @@ export class MusicBrowser {
     if (!this.attached) return;
     this.attached = false;
     this.opts.form.removeEventListener("submit", this.onSubmit);
+    this.searchAbort?.abort();
+    this.searchAbort = null;
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
@@ -76,27 +79,62 @@ export class MusicBrowser {
     }
 
     const seq = ++this.querySeq;
+    this.searchAbort?.abort();
+    const abort = new AbortController();
+    this.searchAbort = abort;
+
     this.setStatus("Searching…");
+    this.showProgress(null);
     this.opts.resultsEl.replaceChildren();
     this.opts.searchBtn.disabled = true;
 
+    let found = 0;
+
     try {
-      const tracks = await searchArchive(q);
+      // decodeAudioData probes require an unlocked AudioContext (user gesture).
+      const audioContext = await this.opts.analyser.getContext();
       if (seq !== this.querySeq) return;
+
+      this.setStatus("Checking which tracks can play…");
+
+      const tracks = await searchArchivePlayable(q, {
+        audioContext,
+        signal: abort.signal,
+        limit: 10,
+        onTrack: (track) => {
+          if (seq !== this.querySeq) return;
+          found += 1;
+          this.opts.resultsEl.appendChild(this.makeTrackButton(track));
+          this.setStatus(
+            found === 1
+              ? "1 playable result"
+              : `${found} playable results`,
+          );
+        },
+      });
+
+      if (seq !== this.querySeq) return;
+
       if (tracks.length === 0) {
         this.setStatus("No playable results — try a different query");
         return;
       }
-      this.setStatus(`${tracks.length} results`);
-      for (const track of tracks) {
-        this.opts.resultsEl.appendChild(this.makeTrackButton(track));
-      }
+      this.setStatus(
+        tracks.length === 1
+          ? "1 playable result"
+          : `${tracks.length} playable results`,
+      );
     } catch (err) {
       if (seq !== this.querySeq) return;
+      if (abort.signal.aborted) return;
       const msg = err instanceof Error ? err.message : "Search failed";
       this.setStatus(msg);
     } finally {
-      if (seq === this.querySeq) this.opts.searchBtn.disabled = false;
+      if (seq === this.querySeq) {
+        this.opts.searchBtn.disabled = false;
+        this.hideProgress();
+        if (this.searchAbort === abort) this.searchAbort = null;
+      }
     }
   }
 

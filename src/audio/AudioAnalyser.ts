@@ -129,6 +129,15 @@ export class AudioAnalyser {
     return this.context !== null && this.context.state === "running";
   }
 
+  /**
+   * Ensure the AudioContext exists (call from a user gesture) and return it.
+   * Used by Archive search probes that need decodeAudioData.
+   */
+  async getContext(): Promise<AudioContext> {
+    await this.unlock();
+    return this.ensureContext();
+  }
+
   private ensureContext(): AudioContext {
     if (this.context && this.analyser && this.gainNode) {
       return this.context;
