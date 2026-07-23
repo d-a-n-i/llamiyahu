@@ -33,6 +33,8 @@ export interface AudioAnalyserSnapshot {
   readonly currentTime: number;
   readonly fileName: string | null;
   readonly error: string | null;
+  /** 0..1 while loading; null when idle / ready / playing. */
+  readonly loadProgress: number | null;
 }
 
 export type AudioAnalyserListener = (snapshot: AudioAnalyserSnapshot) => void;
@@ -84,6 +86,8 @@ export class AudioAnalyser {
   private playerState: PlayerState = "idle";
   private fileName: string | null = null;
   private lastError: string | null = null;
+  private loadProgress: number | null = null;
+  private loadSeq = 0;
 
   // --- Config ---
   private readonly fftSize: number;
@@ -123,6 +127,15 @@ export class AudioAnalyser {
   /** True once the AudioContext exists and is running. */
   get isUnlocked(): boolean {
     return this.context !== null && this.context.state === "running";
+  }
+
+  /**
+   * Ensure the AudioContext exists (call from a user gesture) and return it.
+   * Used by Archive search probes that need decodeAudioData.
+   */
+  async getContext(): Promise<AudioContext> {
+    await this.unlock();
+    return this.ensureContext();
   }
 
   private ensureContext(): AudioContext {
@@ -175,17 +188,27 @@ export class AudioAnalyser {
       throw new Error("No file provided.");
     }
     const name = "name" in file ? file.name : "audio";
+    const seq = ++this.loadSeq;
     this.fileName = name;
     this.lastError = null;
+    this.setProgress(0);
     this.setState("loading");
     try {
-      const data = await file.arrayBuffer();
-      await this.decodeAndAdopt(data);
+      const data = await this.readBlobWithProgress(file, (ratio) => {
+        if (seq !== this.loadSeq) return;
+        // Reserve the top ~12% of the bar for decode.
+        this.setProgress(ratio * 0.88);
+      });
+      if (seq !== this.loadSeq) return;
+      await this.decodeAndAdopt(data, seq);
     } catch (err) {
-      this.lastError =
-        err instanceof Error ? err.message : "Failed to load audio file.";
+      if (seq !== this.loadSeq) return;
+      this.lastError = this.friendlyError(
+        err instanceof Error ? err.message : "Failed to load audio file.",
+      );
+      this.setProgress(null);
       this.setState("idle");
-      throw err;
+      throw new Error(this.lastError);
     }
   }
 
@@ -194,8 +217,10 @@ export class AudioAnalyser {
    * Optional `displayName` is shown in the track label / controls.
    */
   async loadUrl(url: string, displayName?: string): Promise<void> {
+    const seq = ++this.loadSeq;
     this.fileName = displayName ?? url.split("/").pop() ?? url;
     this.lastError = null;
+    this.setProgress(0);
     this.setState("loading");
     try {
       const res = await fetch(url, { mode: "cors", credentials: "omit" });
@@ -205,31 +230,107 @@ export class AudioAnalyser {
         }
         throw new Error(`Failed to fetch audio (${res.status}).`);
       }
-      const data = await res.arrayBuffer();
-      await this.decodeAndAdopt(data);
+      const data = await this.readResponseWithProgress(res, (ratio) => {
+        if (seq !== this.loadSeq) return;
+        this.setProgress(ratio * 0.88);
+      });
+      if (seq !== this.loadSeq) return;
+      await this.decodeAndAdopt(data, seq);
     } catch (err) {
+      if (seq !== this.loadSeq) return;
       const raw = err instanceof Error ? err.message : "Failed to load audio url.";
       // Browsers surface CORS / network failures as the opaque "Failed to fetch".
-      this.lastError =
-        /failed to fetch|networkerror|load failed/i.test(raw)
-          ? "Could not download audio (CORS or network). Try another result or upload a file."
-          : raw;
+      this.lastError = this.friendlyError(raw);
+      this.setProgress(null);
       this.setState("idle");
       throw new Error(this.lastError);
     }
   }
 
-  private async decodeAndAdopt(data: ArrayBuffer): Promise<void> {
+  private friendlyError(raw: string): string {
+    if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+      return "Could not download audio (CORS or network). Try another result or upload a file.";
+    }
+    if (/unable to decode|encoding error|decodeaudio|not supported/i.test(raw)) {
+      return "Couldn't decode this audio — try another result or upload an MP3/WAV.";
+    }
+    return raw;
+  }
+
+  private async readBlobWithProgress(
+    file: Blob,
+    onProgress: (ratio: number) => void,
+  ): Promise<ArrayBuffer> {
+    // Small files: one-shot read is fine.
+    if (file.size <= 256 * 1024 || typeof file.stream !== "function") {
+      onProgress(1);
+      return file.arrayBuffer();
+    }
+    return this.readStreamWithProgress(file.stream(), file.size, onProgress);
+  }
+
+  private async readResponseWithProgress(
+    res: Response,
+    onProgress: (ratio: number) => void,
+  ): Promise<ArrayBuffer> {
+    const total = Number(res.headers.get("content-length"));
+    if (!res.body || !Number.isFinite(total) || total <= 0) {
+      const data = await res.arrayBuffer();
+      onProgress(1);
+      return data;
+    }
+    return this.readStreamWithProgress(res.body, total, onProgress);
+  }
+
+  private async readStreamWithProgress(
+    stream: ReadableStream<Uint8Array>,
+    total: number,
+    onProgress: (ratio: number) => void,
+  ): Promise<ArrayBuffer> {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    onProgress(0);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.byteLength > 0) {
+        chunks.push(value);
+        received += value.byteLength;
+        onProgress(Math.min(1, received / total));
+      }
+    }
+    onProgress(1);
+    const out = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return out.buffer;
+  }
+
+  private async decodeAndAdopt(data: ArrayBuffer, seq: number): Promise<void> {
     const ctx = this.ensureContext();
     this.stopSource();
+    this.setProgress(0.9);
     // `decodeAudioData` detaches the input buffer on some browsers, so we
     // hand it a private copy. This also lets the caller hold on to `data`.
     const copy = data.slice(0);
-    const decoded = await ctx.decodeAudioData(copy);
+    let decoded: AudioBuffer;
+    try {
+      decoded = await ctx.decodeAudioData(copy);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "Unable to decode audio data";
+      throw new Error(raw);
+    }
+    if (seq !== this.loadSeq) return;
     this.buffer = decoded;
     this.pausedAt = 0;
     this.startedAt = 0;
+    this.setProgress(1);
     this.setState("ready");
+    this.setProgress(null);
   }
 
   // ---------------------------------------------------------------------------
@@ -422,7 +523,21 @@ export class AudioAnalyser {
       currentTime: this.currentTime,
       fileName: this.fileName,
       error: this.lastError,
+      loadProgress: this.loadProgress,
     };
+  }
+
+  private setProgress(value: number | null): void {
+    const next =
+      value == null ? null : Math.max(0, Math.min(1, value));
+    if (this.loadProgress === next) {
+      // Still notify so UI can refresh during long downloads with unchanged
+      // rounded values at the endpoints.
+      if (next === 0 || next === 1) this.notify();
+      return;
+    }
+    this.loadProgress = next;
+    this.notify();
   }
 
   // ---------------------------------------------------------------------------

@@ -12,6 +12,23 @@ export interface TrackRef {
   readonly artist: string;
   readonly url: string;
   readonly source: "archive";
+  /** Direct media URL, set after a successful playability probe. */
+  readonly playableUrl?: string;
+}
+
+export interface SearchPlayableOptions {
+  /** Used to probe-decode a prefix of each candidate file. */
+  audioContext: AudioContext;
+  /** Max results to return after filtering. */
+  limit?: number;
+  /** How many Archive hits to consider before probing. */
+  candidateRows?: number;
+  /** Parallel probe workers. */
+  concurrency?: number;
+  /** Abort in-flight probes (e.g. new search started). */
+  signal?: AbortSignal;
+  /** Called as each track passes validation (progressive UI). */
+  onTrack?: (track: TrackRef) => void;
 }
 
 interface ArchiveSearchDoc {
@@ -31,6 +48,9 @@ interface ArchiveFile {
 }
 
 const MAX_BYTES = 40 * 1024 * 1024; // skip huge dumps; keep decode snappy
+const PROBE_BYTES_QUICK = 256 * 1024;
+const PROBE_BYTES_DEEP = 1024 * 1024; // covers large ID3/album-art prefixes
+const MIN_PROBE_BYTES = 2 * 1024;
 
 function asString(value: string | string[] | undefined, fallback: string): string {
   if (!value) return fallback;
@@ -53,7 +73,7 @@ function buildSearchUrl(query: string, rows: number): string {
   // dominate "downloads" rankings and feel like bad search results.
   const q = [
     "mediatype:audio",
-    '(format:"VBR MP3" OR format:MP3 OR format:"128Kbps MP3")',
+    '(format:"VBR MP3" OR format:MP3 OR format:"128Kbps MP3" OR format:"Ogg Vorbis" OR format:WAVE OR format:Flac)',
     `(title:(${escaped}) OR creator:(${escaped}) OR subject:(${escaped}))`,
     "-collection:(librivoxaudio OR librivox OR podcasts OR radio OR community_media OR oldtimeradio OR radio_programs OR radio_archive)",
   ].join(" AND ");
@@ -65,7 +85,6 @@ function buildSearchUrl(query: string, rows: number): string {
   params.append("fl[]", "creator");
   params.append("fl[]", "collection");
   params.append("fl[]", "downloads");
-  // week > downloads: fresher music-ish hits beat ancient public-domain dumps
   params.append("sort[]", "downloads desc");
   params.set("rows", String(rows));
   params.set("page", "1");
@@ -104,7 +123,265 @@ function scoreDoc(doc: ArchiveSearchDoc, queryLower: string): number {
   return score;
 }
 
-/** Search the Internet Archive for downloadable public MP3 audio. */
+function isPrivateFile(f: ArchiveFile): boolean {
+  return f.private === true || f.private === "true";
+}
+
+function fileSize(f: ArchiveFile): number {
+  const n = Number(f.size);
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+function isPlayableName(name: string): boolean {
+  return /\.(mp3|ogg|oga|wav|wave|flac|m4a)$/i.test(name);
+}
+
+function pickBestAudio(files: ArchiveFile[]): ArchiveFile | null {
+  const candidates = files
+    .filter((f) => isPlayableName(f.name) && !isPrivateFile(f))
+    .filter((f) => fileSize(f) <= MAX_BYTES)
+    // Skip tiny stubs / empty placeholders.
+    .filter((f) => fileSize(f) >= 32 * 1024);
+
+  if (candidates.length === 0) return null;
+
+  const rank = (f: ArchiveFile): number => {
+    const fmt = (f.format ?? "").toLowerCase();
+    const name = f.name.toLowerCase();
+    let r = 0;
+    if (name.endsWith(".mp3") || fmt.includes("mp3") || fmt.includes("vbr")) r += 5;
+    if (fmt.includes("vbr")) r += 2;
+    if (fmt.includes("128")) r += 1;
+    if (name.endsWith(".ogg") || name.endsWith(".oga") || fmt.includes("ogg")) r += 4;
+    if (name.endsWith(".wav") || fmt.includes("wave") || fmt === "wav") r += 3;
+    if (name.endsWith(".flac") || fmt.includes("flac")) r += 2;
+    if (name.endsWith(".m4a") || fmt.includes("m4a") || fmt.includes("aac")) r += 2;
+    // Prefer derived/stream copies over giant originals when both exist.
+    if (f.source !== "original") r += 1;
+    // Prefer smaller among equals (faster load).
+    r -= Math.min(2, fileSize(f) / (20 * 1024 * 1024));
+    return r;
+  };
+
+  candidates.sort((a, b) => rank(b) - rank(a));
+  return candidates[0] ?? null;
+}
+
+/** True if the byte prefix looks like real audio rather than HTML/JSON/error pages. */
+export function looksLikeAudio(data: ArrayBuffer): boolean {
+  if (data.byteLength < 12) return false;
+  const bytes = new Uint8Array(data);
+  const ascii = String.fromCharCode(...bytes.subarray(0, Math.min(16, bytes.length)));
+
+  // Reject common non-audio payloads Archive sometimes returns with 200.
+  if (/^\s*</.test(ascii) || /^<!doctype/i.test(ascii) || /^\{/.test(ascii)) {
+    return false;
+  }
+
+  // ID3v2 tag
+  if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return true;
+  // MP3 frame sync (11 set bits)
+  if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return true;
+  // Ogg
+  if (ascii.startsWith("OggS")) return true;
+  // WAV / AIFF
+  if (ascii.startsWith("RIFF") || ascii.startsWith("FORM")) return true;
+  // FLAC
+  if (ascii.startsWith("fLaC")) return true;
+  // MP4 / M4A
+  if (bytes.length >= 8) {
+    const brand = String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]);
+    if (brand === "ftyp") return true;
+  }
+  return false;
+}
+
+function downloadUrl(identifier: string, fileName: string): string {
+  return `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(fileName)}`;
+}
+
+async function resolveAudioUrl(identifier: string, signal?: AbortSignal): Promise<string | null> {
+  const res = await fetch(
+    `https://archive.org/metadata/${encodeURIComponent(identifier)}`,
+    { signal },
+  );
+  if (!res.ok) return null;
+  const meta = (await res.json()) as { files?: ArchiveFile[] };
+  const preferred = pickBestAudio(meta.files ?? []);
+  if (!preferred) return null;
+  return downloadUrl(identifier, preferred.name);
+}
+
+/**
+ * Fetch a prefix of the file and confirm the browser can decode it.
+ * Rejects HTML error pages, empty stubs, and undecodable payloads up front.
+ */
+async function probePlayableUrl(
+  url: string,
+  audioContext: AudioContext,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  // Try a small prefix first; if it looks like audio but won't decode
+  // (common with huge ID3/album-art tags), retry with a deeper range.
+  for (const size of [PROBE_BYTES_QUICK, PROBE_BYTES_DEEP]) {
+    if (signal?.aborted) return false;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        mode: "cors",
+        credentials: "omit",
+        headers: { Range: `bytes=0-${size - 1}` },
+        signal,
+      });
+    } catch {
+      return false;
+    }
+
+    if (!(res.ok || res.status === 206)) return false;
+
+    const type = (res.headers.get("content-type") || "").toLowerCase();
+    if (type && /text\/html|application\/json|text\/plain/.test(type)) {
+      return false;
+    }
+
+    let data: ArrayBuffer;
+    try {
+      data = await res.arrayBuffer();
+    } catch {
+      return false;
+    }
+
+    if (data.byteLength < MIN_PROBE_BYTES) return false;
+    if (!looksLikeAudio(data)) return false;
+
+    try {
+      await audioContext.decodeAudioData(data.slice(0));
+      return true;
+    } catch {
+      // Fall through to a deeper probe when possible.
+      if (size >= PROBE_BYTES_DEEP || data.byteLength < size) {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+async function validateCandidate(
+  track: TrackRef,
+  audioContext: AudioContext,
+  signal?: AbortSignal,
+): Promise<TrackRef | null> {
+  if (signal?.aborted) return null;
+  try {
+    const identifier = track.url.startsWith("archive://")
+      ? track.url.slice("archive://".length)
+      : track.id;
+    const playableUrl = await resolveAudioUrl(identifier, signal);
+    if (!playableUrl) return null;
+    const ok = await probePlayableUrl(playableUrl, audioContext, signal);
+    if (!ok) return null;
+    return { ...track, playableUrl };
+  } catch {
+    return null;
+  }
+}
+
+async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R | null>,
+  opts: {
+    signal?: AbortSignal;
+    shouldStop?: () => boolean;
+  } = {},
+): Promise<R[]> {
+  const results: R[] = [];
+  let cursor = 0;
+
+  const run = async (): Promise<void> => {
+    while (cursor < items.length) {
+      if (opts.signal?.aborted || opts.shouldStop?.()) return;
+      const index = cursor++;
+      const item = items[index];
+      if (item === undefined) return;
+      const value = await worker(item);
+      if (value != null) results.push(value);
+    }
+  };
+
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => run()));
+  return results;
+}
+
+/**
+ * Search Archive.org, then probe each hit so only browser-decodable public
+ * audio appears in the result list.
+ */
+export async function searchArchivePlayable(
+  query: string,
+  options: SearchPlayableOptions,
+): Promise<TrackRef[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const limit = options.limit ?? 10;
+  const candidateRows = options.candidateRows ?? 36;
+  const concurrency = options.concurrency ?? 4;
+  const { audioContext, signal, onTrack } = options;
+
+  const res = await fetch(buildSearchUrl(trimmed, candidateRows), { signal });
+  if (!res.ok) {
+    throw new Error(`Archive search failed (${res.status})`);
+  }
+  const json = (await res.json()) as {
+    response?: { docs?: ArchiveSearchDoc[] };
+  };
+  const docs = json.response?.docs ?? [];
+  const qLower = trimmed.toLowerCase();
+
+  const candidates: TrackRef[] = docs
+    .filter((d) => typeof d.identifier === "string" && d.identifier.length > 0)
+    .map((d) => ({ doc: d, score: scoreDoc(d, qLower) }))
+    .filter((x) => x.score > -5)
+    .sort((a, b) => b.score - a.score)
+    .map(({ doc }) => {
+      const id = doc.identifier as string;
+      return {
+        id,
+        title: asString(doc.title, id),
+        artist: asString(doc.creator, "Unknown"),
+        url: `archive://${id}`,
+        source: "archive" as const,
+      };
+    });
+
+  const playable: TrackRef[] = [];
+
+  await mapPool(
+    candidates,
+    concurrency,
+    async (track) => {
+      if (playable.length >= limit) return null;
+      const validated = await validateCandidate(track, audioContext, signal);
+      if (!validated) return null;
+      if (playable.length >= limit) return null;
+      playable.push(validated);
+      onTrack?.(validated);
+      return validated;
+    },
+    {
+      signal,
+      shouldStop: () => playable.length >= limit || !!signal?.aborted,
+    },
+  );
+
+  return playable.slice(0, limit);
+}
+
+/** @deprecated Prefer searchArchivePlayable — unvalidated hits often fail decode. */
 export async function searchArchive(
   query: string,
   rows = 24,
@@ -140,63 +417,21 @@ export async function searchArchive(
     });
 }
 
-function isPrivateFile(f: ArchiveFile): boolean {
-  return f.private === true || f.private === "true";
-}
-
-function fileSize(f: ArchiveFile): number {
-  const n = Number(f.size);
-  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
-}
-
-function pickBestMp3(files: ArchiveFile[]): ArchiveFile | null {
-  const candidates = files
-    .filter((f) => /\.mp3$/i.test(f.name) && !isPrivateFile(f))
-    .filter((f) => fileSize(f) <= MAX_BYTES);
-
-  if (candidates.length === 0) return null;
-
-  const rank = (f: ArchiveFile): number => {
-    const fmt = (f.format ?? "").toLowerCase();
-    let r = 0;
-    if (fmt.includes("vbr")) r += 3;
-    if (fmt.includes("128")) r += 2;
-    if (fmt === "mp3") r += 1;
-    // Prefer derived/stream copies over giant originals when both exist.
-    if (f.source !== "original") r += 1;
-    // Prefer smaller among equals (faster load).
-    r -= Math.min(2, fileSize(f) / (20 * 1024 * 1024));
-    return r;
-  };
-
-  candidates.sort((a, b) => rank(b) - rank(a));
-  return candidates[0] ?? null;
-}
-
 /**
- * Resolve an archive://identifier to a playable public MP3 URL.
- * Skips private files and verifies the download responds with 200/206.
+ * Resolve an archive://identifier to a playable public audio URL.
+ * Uses a cached playableUrl when the track was pre-validated.
  */
 export async function resolvePlayableUrl(track: TrackRef): Promise<string> {
+  if (track.playableUrl) return track.playableUrl;
   if (!track.url.startsWith("archive://")) {
     return track.url;
   }
 
   const identifier = track.url.slice("archive://".length);
-  const res = await fetch(
-    `https://archive.org/metadata/${encodeURIComponent(identifier)}`,
-  );
-  if (!res.ok) {
-    throw new Error(`Could not load Archive item (${res.status})`);
+  const url = await resolveAudioUrl(identifier);
+  if (!url) {
+    throw new Error("No public audio under 40MB on this item — try another result.");
   }
-  const meta = (await res.json()) as { files?: ArchiveFile[] };
-  const preferred = pickBestMp3(meta.files ?? []);
-
-  if (!preferred) {
-    throw new Error("No public MP3 under 40MB on this item — try another result.");
-  }
-
-  const url = `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(preferred.name)}`;
 
   // HEAD first: catch private/401 before we burn a full download.
   try {
