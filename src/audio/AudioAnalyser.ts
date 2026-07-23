@@ -189,15 +189,22 @@ export class AudioAnalyser {
     }
   }
 
-  /** Load audio from a URL (same-origin or properly CORS-enabled). */
-  async loadUrl(url: string): Promise<void> {
-    this.fileName = url.split("/").pop() ?? url;
+  /**
+   * Load audio from a URL (same-origin or properly CORS-enabled).
+   * Optional `displayName` is shown in the track label instead of the URL tail.
+   */
+  async loadUrl(url: string, displayName?: string): Promise<void> {
+    this.fileName = displayName ?? url.split("/").pop() ?? url;
     this.lastError = null;
     this.setState("loading");
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { mode: "cors", credentials: "omit" });
       if (!res.ok) {
-        throw new Error(`Failed to fetch audio: ${res.status} ${res.statusText}`);
+        throw new Error(
+          res.status === 401 || res.status === 403
+            ? "This file is restricted — try another result."
+            : `Failed to fetch audio (${res.status}).`,
+        );
       }
       const data = await res.arrayBuffer();
       await this.decodeAndAdopt(data);
